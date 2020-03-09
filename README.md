@@ -15,4 +15,6 @@ The code presented is in no way complete and will continue to be a hack until th
  - Displays to share SPI bus, but have their own chip selects.
  - EPD LUTs to be runtime configurable (because why not?)
 
+The actual driving logic is based off the great work that [Waveshare](https://www.waveshare.com) have put together.
+
 More info to come.
