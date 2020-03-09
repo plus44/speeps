@@ -14,20 +14,24 @@
  ******************************************************************************/
 #define EPDHW_MAX_NUM_DEV               (100)
 
+#define EPDHW_TRUE                      ((uint8_t)1)
+#define EPDHW_FALSE                     ((uint8_t)0)
+
+/* DEFAULT */
+typedef uint8_t                         epd_byte_t;
+
 /*******************************************************************************
  * PUBLIC STRUCTURE DECLARATIONS
  ******************************************************************************/
 struct epdhw
 {
-        uint8_t spi_port;
-
-        uint16_t pin_spi_miso;
-        uint16_t pin_spi_mosi;
-        uint16_t pin_spi_sck;
-        uint16_t pin_rst;
-        uint16_t pin_dc;
-        uint16_t pin_cs;
-        uint16_t pin_busy;
+        int pin_spi_miso;
+        int pin_spi_mosi;
+        int pin_spi_sck;
+        int pin_rst;
+        int pin_dc;
+        int pin_cs;
+        int pin_busy;
 
         uint8_t is_init;
 
@@ -46,7 +50,7 @@ struct epdhw
  *
  * \returns 0 if success, -errno if failure
  */
-int epdhw_digital_write(uint16_t pin, uint8_t val);
+int epdhw_digital_write(uint16_t pin, epd_byte_t val);
 
 /**
  * Read the value on a given digital pin.
@@ -55,7 +59,7 @@ int epdhw_digital_write(uint16_t pin, uint8_t val);
  * 
  * \returns 0 if LOW, 1 if HIGH
  */
-uint8_t epdhw_digital_read(uint16_t pin);
+epd_byte_t epdhw_digital_read(uint16_t pin);
 
 /**
  * Write a single byte using the SPI port.
@@ -65,7 +69,7 @@ uint8_t epdhw_digital_read(uint16_t pin);
  *
  * \returns 0 if success, -errno if failure
  */
-int epdhw_spi_write_byte(struct epdhw *epdhw, uint8_t val);
+int epdhw_spi_write_byte(struct epdhw *epdhw, epd_byte_t val);
 
 /**
  * Delay for a number of milliseconds.

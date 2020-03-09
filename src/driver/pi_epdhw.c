@@ -21,6 +21,7 @@
  * USER HEADERS
  ******************************************************************************/
 #include "driver/epdhw.h"
+#include "driver/pi_epdhw.h"
 
 /*******************************************************************************
  * PRIVATE VARIABLES
@@ -28,30 +29,36 @@
 static uint8_t spi_is_init_ = 0;
 
 /*******************************************************************************
+ * PRIVATE FUNCTION DECLARATIONS
+ ******************************************************************************/
+static int epdhw_set_chip_select(struct epdhw *epdhw);
+
+/*******************************************************************************
  * PUBLIC FUNCTION DEFINITIONS
  ******************************************************************************/
 int epdhw_digital_write(
-        uint16_t pin,
-        uint8_t val
+        int pin,
+        epd_byte_t val
         )
 {
-        bcm2835_gpio_write(pin, val);
+        bcm2835_gpio_write(pin, (uint8_t)val);
         return 0;
 }
 
-uint8_t epdhw_digital_read(
-        uint16_t pin
+epd_byte_t epdhw_digital_read(
+        int pin
         )
 {
-        return bcm2835_gpio_lev(pin);
+        return ((uint8_t)bcm2835_gpio_lev(pin));
 }
 
 int epdhw_spi_write_byte(
         struct epdhw *epdhw,
-        uint8_t val
+        epd_byte_t val
         )
 {
         bcm2835_spi_transfer(val);
+        return 0;
 }
 
 void epdhw_delay(
@@ -93,11 +100,15 @@ int epdhw_init(
         struct epdhw *epdhw
         )
 {
-        if (!epdhw->is_init) {
+        if (EPDHW_FALSE == epdhw->is_init) {
                 bcm2835_gpio_fsel(epdhw->pin_rst , BCM2835_GPIO_FSEL_OUTP);
                 bcm2835_gpio_fsel(epdhw->pin_dc  , BCM2835_GPIO_FSEL_OUTP);
                 bcm2835_gpio_fsel(epdhw->pin_cs  , BCM2835_GPIO_FSEL_OUTP);
                 bcm2835_gpio_fsel(epdhw->pin_busy, BCM2835_GPIO_FSEL_INPT);
+                
+                ret = epdhw_set_chip_select(epdhw);
+
+                epdhw->is_init = (ret == 0) ? EPDHW_TRUE : EPDHW_FALSE;
         }
 
         return 0;
@@ -107,9 +118,12 @@ void epdhw_deinit(
         struct epdhw *epdhw
         )
 {
-        epdhw_digital_write(epdhw->pin_cs , 0);
-        epdhw_digital_write(epdhw->pin_dc , 0);
-        epdhw_digital_write(epdhw->pin_rst, 0);
+        if (EPDHW_TRUE == epdhw->is_init) {
+                epdhw_digital_write(epdhw->pin_cs , 0);
+                epdhw_digital_write(epdhw->pin_dc , 0);
+                epdhw_digital_write(epdhw->pin_rst, 0);
+                epdhw->is_init = EPDHW_FALSE;
+        }
 }
 
 void epdhw_free(
@@ -124,7 +138,7 @@ void epdhw_free(
 
 int epdhw_init_global()
 {
-        if (!spi_is_init_) {
+        if (EPDHW_FALSE == spi_is_init_) {
                 if (!bcm2835_init()) {
                         return -EACCESS;
                 }
@@ -137,15 +151,51 @@ int epdhw_init_global()
                 bcm2835_spi_setDataMode(BCM2835_SPI_MODE0);
                 /* Frequency */
                 bcm2835_spi_setClockDivider(BCM2835_SPI_CLOCK_DIVIDER_128);
+
+                spi_is_init_ = EPDHW_TRUE;
         }
         return 0;
 }
 
 void epdhw_deinit_global()
 {
-        bcm2835_spi_end();
-        bcm2835_close();
-        spi_is_init_ == 0;
+        if (EPDHW_TRUE == spi_is_init_) {
+                bcm2835_spi_end();
+                bcm2835_close();
+                spi_is_init_ == EPDHW_FALSE;
+        }
+}
+
+/*******************************************************************************
+ * PRIVATE FUNCTION DEFINITIONS
+ ******************************************************************************/
+static int epdhw_set_chip_select(
+        struct epdhw *epdhw
+        )
+{
+        int ret = -EINVAL;
+        bcm2835SPIChipSelect cs = BCM2835_SPI_CS_NONE;
+
+        switch (epdhw->pin_cs) {
+        case EPDHW_SPI_PIN_CS0:
+                cs = BCM2835_SPI_CS0;
+                break;
+        case EPDHW_SPI_PIN_CS1:
+                cs = BCM2835_SPI_CS1;
+                break;
+        case EPDHW_SPI_PIN_CS2:
+                cs = BCM2835_SPI_CS2;
+        default:
+                break;
+        }
+
+        if (BCM2835_SPI_CS_NONE != cs)
+        {
+                bcm2835_spi_chipSelect(cs);
+                bcm2835_spi_setChipSelectPolarity(cs, LOW);
+                ret = 0; 
+        }
+        return ret;
 }
 
 /******************************** END OF FILE *********************************/

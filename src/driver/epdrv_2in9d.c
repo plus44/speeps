@@ -1,0 +1,272 @@
+/*******************************************************************************
+ * Project: EPD
+ *
+ * Driver for 2.9in EPD display
+ *
+ * Written by Mihnea Rusu, 07/03/2020
+ ******************************************************************************/
+
+/*******************************************************************************
+ * SYSTEM HEADERS
+ ******************************************************************************/
+#include "errno.h"
+
+/*******************************************************************************
+ * USER HEADERS
+ ******************************************************************************/
+#include "driver/epdrv_2in9d.h"
+#include "driver/epdisp.h"
+#include "driver/epdhw.h"
+
+/*******************************************************************************
+ * PRIVATE FUNCTION DECLARATIONS
+ ******************************************************************************/
+static int epd_2in9d_reset(struct epdisp *epdisp);
+static int epd_2in9d_send_command(struct epdisp *epdisp, epd_byte_t reg);
+static int epd_2in9d_send_data(struct epdisp *epdisp, epd_byte_t byte);
+static void epd_2in9d_wait_busy(struct epdisp *epdisp);
+static int epd_2in9d_set_full_reg(struct epdisp *epdisp);
+static int epd_2in9d_set_part_reg(struct epdisp *epdisp);
+static int epd_2in9d_turn_on_disp(struct epdisp *epdisp);
+
+/* Interface functions */
+static int epdrv_2in9d_init(struct epdisp *epdisp);
+static int epdrv_2in9d_clear(struct epdisp *epdisp);
+static int epdrv_2in9d_display(struct epdisp *epdisp,
+                               const epd_byte_t *const img);
+static int epdrv_2in9d_display_part(struct epdisp *epdisp,
+                                    const epd_byte_t *const img);
+static int epdrv_2in9d_sleep(struct epdisp *epdisp);
+
+/*******************************************************************************
+ * GLOBAL VARIABLE DEFINITIONS
+ ******************************************************************************/
+struct epdrv epdrv_2in9d {
+        .init = epdrv_2in9d_init,
+        .clear = epdrv_2in9d_clear,
+        .display = epdrv_2in9d_display,
+        .display_part = epdrv_2in9d_display_part,
+        .sleep = epdrv_2in9d_sleep,
+        .type = EPDRV_TYPE_MONOCHROME,
+        .extra = NULL
+};
+
+/*******************************************************************************
+ * PRIVATE VARIABLE DEFINITIONS
+ ******************************************************************************/
+/**
+ * Full screen update LUT
+ **/
+const unsigned char lut_2in9d_vcomDC[] = {
+    0x00, 0x08, 0x00, 0x00, 0x00, 0x02,
+    0x60, 0x28, 0x28, 0x00, 0x00, 0x01,
+    0x00, 0x14, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x12, 0x12, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00,
+};
+const unsigned char lut_2in9d_ww[] = {
+    0x40, 0x08, 0x00, 0x00, 0x00, 0x02,
+    0x90, 0x28, 0x28, 0x00, 0x00, 0x01,
+    0x40, 0x14, 0x00, 0x00, 0x00, 0x01,
+    0xA0, 0x12, 0x12, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+const unsigned char lut_2in9d_bw[] = {
+    0x40, 0x17, 0x00, 0x00, 0x00, 0x02,
+    0x90, 0x0F, 0x0F, 0x00, 0x00, 0x03,
+    0x40, 0x0A, 0x01, 0x00, 0x00, 0x01,
+    0xA0, 0x0E, 0x0E, 0x00, 0x00, 0x02,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+const unsigned char lut_2in9d_wb[] = {
+    0x80, 0x08, 0x00, 0x00, 0x00, 0x02,
+    0x90, 0x28, 0x28, 0x00, 0x00, 0x01,
+    0x80, 0x14, 0x00, 0x00, 0x00, 0x01,
+    0x50, 0x12, 0x12, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+const unsigned char lut_2in9d_bb[] = {
+    0x80, 0x08, 0x00, 0x00, 0x00, 0x02,
+    0x90, 0x28, 0x28, 0x00, 0x00, 0x01,
+    0x80, 0x14, 0x00, 0x00, 0x00, 0x01,
+    0x50, 0x12, 0x12, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+
+/**
+ * Partial screen update LUT
+ **/
+const unsigned char lut_2in9d_vcom1[] = {
+    0x00, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ,0x00, 0x00,
+};
+const unsigned char lut_2in9d_ww1[] = {
+    0x00, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+const unsigned char lut_2in9d_bw1[] = {
+    0x80, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+const unsigned char lut_2in9d_wb1[] = {
+    0x40, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+const unsigned char lut_2in9d_bb1[] = {
+    0x00, 0x19, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+
+/*******************************************************************************
+ * PRIVATE FUNCTION DEFINITIONS
+ ******************************************************************************/
+static int epd_2in9d_reset(
+        struct epdisp *epdisp
+        )
+{
+        int ret = epdhw_digital_write(epdisp->hw->pin_rst, 1);
+        epdhw_delay(200);
+        ret = (0 == ret) ? epdhw_digital_write(epdisp->hw->pin_rst, 0);
+        epdhw_delay(200);
+        ret = (0 == ret) ? epdhw_digital_write(epdisp->hw->pin_rst, 1);
+        epdhw_delay(200);
+        return ret;
+}
+
+static int epd_2in9d_send_command(
+        struct epdisp *epdisp,
+        epd_byte_t reg
+        )
+{
+        int ret = epdhw_digital_write(epdisp->hw->pin_dc, 0);
+        ret = (0 == ret) ? epdhw_digital_write(epdisp->hw->pin_cs, 0) : ret;
+        ret = (0 == ret) ? epdhw_spi_write_byte(epdisp->hw, byte) : ret;
+        ret = (0 == ret) ? epdhw_digital_write(epdisp->hw->pin_cs, 1) : ret;
+        return ret;
+}
+
+static int epd_2in9d_send_data(
+        struct epdisp *epdisp,
+        epd_byte_t byte
+        )
+{
+        /* TODO MR Is this a bit OTT? */
+        int ret = epdhw_digital_write(epdisp->hw->pin_dc, 1);
+        ret = (0 == ret) ? epdhw_digital_write(epdisp->hw->pin_cs, 0) : ret;
+        ret = (0 == ret) ? epdhw_spi_write_byte(epdisp->hw, byte) : ret;
+        ret = (0 == ret) ? epdhw_digital_write(epdisp->hw->pin_cs, 1) : ret;
+        return ret;
+}
+
+static void epd_2in9d_wait_busy(
+        struct epdisp *epdisp
+        )
+{
+        epd_byte_t busy;
+        do {
+                /* TODO MR enum for commands*/
+                int ret = epd_2in9d_send_command(epdisp, 0x71);
+                busy = epdhw_digital_read(epdisp->hw->pin_busy);
+                busy = !(busy & 0x01);
+        } while ((0 == ret) && busy);
+        epdhw_delay(200);
+}
+
+static int epd_2in9d_set_full_reg(
+        struct epdisp *epdisp
+        )
+{
+        return 0;
+}
+
+static int epd_2in9d_set_part_reg(
+        struct epdisp *epdisp
+        )
+{
+        return 0;
+}
+
+static int epd_2in9d_turn_on_disp(
+        struct epdisp *epdisp
+        )
+{
+        return 9;
+}
+
+int epdrv_2in9d_init(
+        struct edpisp *epdisp
+        )
+{
+        return 0;
+}
+
+int epdrv_2in9d_clear(
+        struct edpisp *epdisp
+        )
+{
+        return 0;
+}
+
+int epdrv_2in9d_display(
+        struct edpisp* epdisp,
+        const epd_byte_t *const img
+        )
+{
+        return 0;
+}
+
+int epdrv_2in9d_display_part(
+        struct edpisp* epdisp,
+        const epd_byte_t *const img
+        )
+{
+        return 0;
+}
+
+int epdrv_2in9d_sleep(
+        struct edpisp* epdisp
+        )
+{
+        return 0;
+}
+
+/******************************** END OF FILE *********************************/

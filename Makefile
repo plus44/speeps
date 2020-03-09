@@ -5,7 +5,7 @@ CFLAGS   += $(LDFLAGS) -g -O0 -Wall
 
 CC = gcc
 
-OBJ_DRIVER = driver/pi_epdhw.o
+OBJ_DRIVER = driver/pi_epdhw.o driver/epdrv_2in9d.o
 TARGET = epd
 
 DEBUG_OR_RELEASE = DEBUG
